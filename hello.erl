@@ -1,4 +1,4 @@
--module(math_test).
+-module(hello).
 -export([add/2]).
 
 add(A, B) ->
