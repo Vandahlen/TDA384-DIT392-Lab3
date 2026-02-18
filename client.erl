@@ -18,36 +18,59 @@ initial_state(Nick, GUIAtom, ServerAtom) ->
         server = ServerAtom
     }.
 
-% handle/2 handles each kind of request from GUI
-% Parameters:
-%   - the current state of the client (St)
-%   - request data from GUI
-% Must return a tuple {reply, Data, NewState}, where:
-%   - Data is what is sent to GUI, either the atom `ok` or a tuple {error, Atom, "Error message"}
-%   - NewState is the updated state of the client
-
 % Join channel
 handle(St, {join, Channel}) ->
-    % TODO: Implement this function
-    % {reply, ok, St} ;
-    {reply, {error, not_implemented, "join not implemented"}, St} ;
+    Server = St#client_st.server,
+    Nick = St#client_st.nick,
+    Result = case catch genserver:request(Server, {join, Channel, self(), Nick}) of
+        {'EXIT', _} -> {error, server_not_reached, "Server timed out"};
+        timeout_error -> {error, server_not_reached, "Server timed out"};
+        Other -> Other
+    end,
+    {reply, Result, St};
 
 % Leave channel
 handle(St, {leave, Channel}) ->
-    % TODO: Implement this function
-    % {reply, ok, St} ;
-    {reply, {error, not_implemented, "leave not implemented"}, St} ;
+    Server = St#client_st.server,
+    Result = case catch genserver:request(Server, {leave, Channel, self()}) of
+    {'EXIT', _} -> ok;
+    timeout_error -> ok;
+    Other -> Other
+    end,
+    {reply, Result, St};
 
 % Sending message (from GUI, to channel)
 handle(St, {message_send, Channel, Msg}) ->
-    % TODO: Implement this function
-    % {reply, ok, St} ;
-    {reply, {error, not_implemented, "message sending not implemented"}, St} ;
+    Server = St#client_st.server,
+    Nick = St#client_st.nick,
+
+    TryResult = catch genserver:request(Server, {message_send, Channel, self(), Nick, Msg}),
+
+    Result = case TryResult of
+        {'EXIT', _} -> {error, server_not_reached, "Server timed out"};
+        timeout_error -> {error, server_not_reached, "Server timed out"};
+        {error, user_not_joined, "Channel does not exist"} -> 
+        {error, server_not_reached, "Channel does not exist"};
+        Other -> Other
+    end,
+    {reply, Result, St};
 
 % This case is only relevant for the distinction assignment!
 % Change nick (no check, local only)
 handle(St, {nick, NewNick}) ->
-    {reply, ok, St#client_st{nick = NewNick}} ;
+    Server = St#client_st.server,
+    OldNick = St#client_st.nick,
+
+    Result = genserver:request(Server, {nick, OldNick, NewNick, self()}),
+    
+    case Result of
+        ok -> 
+            {reply, ok, St#client_st{nick = NewNick}};
+        {error, nick_taken, _} ->
+            {reply, {error, nick_taken, "Nick taken"}, St};
+        OtherError ->
+             {reply, OtherError, St}
+    end;
 
 % ---------------------------------------------------------------------------
 % The cases below do not need to be changed...
@@ -68,5 +91,6 @@ handle(St, quit) ->
     {reply, ok, St} ;
 
 % Catch-all for any unhandled requests
-handle(St, Data) ->
+handle(St, _Data) ->
     {reply, {error, not_implemented, "Client does not handle this command"}, St} .
+    
